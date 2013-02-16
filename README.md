@@ -1,4 +1,4 @@
 logx
-====
+------
+Code to improve logging in Adaptive C/C++ codebases.
 
-tool for transforming logging in C++ codebase
