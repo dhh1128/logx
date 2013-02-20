@@ -2,6 +2,10 @@ import os
 import operator
 import re
 
+# This pattern only finds "MLog(", optionally preceded by "MDB(...)". However, the MDB
+# part is only included if the two calls are only separated by whitespace. If there
+# is an MDB() separated from MLog by other statements, or by a curly brace, the MLog
+# call will be found, but it will be treated as if it had no MDB(...) prefix.
 _LOG_PAT = re.compile(r'((\bMDB[EO]?\s*\(([^\)]*?)\))[ \r\n]*|\b)MLog\s*\(', re.DOTALL)
 _LBL_PAT = re.compile(r'\(\s*(.*?)[%\t, :]')
 _CANONICAL_LBL_PAT = re.compile('[A-Z]+$')
@@ -60,7 +64,8 @@ class LogCall:
     def __init__(self, txt, match):
         self.txt = txt
         self.begin = match.start()
-        self.end = txt.find(';', self.begin)
+        # Find all args, and the end of the MLog statement.
+        self._parse()
         self.level = None
         self.facility = None
         self.filter_func = None
@@ -80,6 +85,41 @@ class LogCall:
         else:
             pass #print('No MDB: <<<%s>>>' % self.txt[self.begin:self.end])
         self._dc = None
+        
+    def _parse(self):
+        args = []
+        begin = self.txt.find('MLog', self.begin)
+        begin = self.txt.find('(', begin) + 1
+        inQuote = False
+        parenCount = 1
+        for i in xrange(begin, len(self.txt)):
+            c = self.txt[i]
+            if c == '"':
+                inQuote = not inQuote
+            elif c == '\\':
+                if inQuote:
+                    i += 1
+            elif c == '(':
+                if not inQuote:
+                    parenCount += 1
+            elif c == ')':
+                if not inQuote:
+                    parenCount -= 1
+                    if parenCount == 0:
+                        self.end = self.txt.find(';', i + 1)
+                        break
+            elif c == ',':
+                if not inQuote:
+                    if parenCount == 1:
+                        args.append((begin,i))
+                        begin = i + 1
+                        if len(args) > 20:
+                            print('Suspicious parse of MLog; falling back to dumb parse')
+                            print('First 200 chars: %s' % self.txt[self.begin:self.begin + 200])
+                            self.end = self.txt.find(';', self.begin)
+                            break
+        self.args = args
+        
     @property
     def described_category(self):
         if self._dc is None:
